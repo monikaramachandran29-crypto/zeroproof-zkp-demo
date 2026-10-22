@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ZeroProof | Schnorr ZKP Demo</title>
+
+<style>
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 20px;
+  font-family: Arial, sans-serif;
+  background: #0b1020;
+  color: #f1f5f9;
+}
+
+.container {
+  max-width: 650px;
+  margin: auto;
+}
+
+header {
+  text-align: center;
+  padding: 20px 10px;
+}
+
+header h1 {
+  color: #38bdf8;
+  margin-bottom: 8px;
+}
+
+header p {
+  color: #a5b4fc;
+  line-height: 1.6;
+}
+
+.card {
+  background: #151e33;
+  border: 1px solid #334155;
+  border-radius: 14px;
+  padding: 18px;
+  margin: 16px 0;
+}
+
+h2 {
+  font-size: 19px;
+  color: #7dd3fc;
+}
+
+label {
+  display: block;
+  margin: 12px 0 7px;
+}
+
+input {
+  width: 100%;
+  padding: 13px;
+  border-radius: 8px;
+  border: 1px solid #475569;
+  background: #0b1020;
+  color: white;
+  font-size: 16px;
+}
+
+button {
+  width: 100%;
+  padding: 13px;
+  margin-top: 12px;
+  border: none;
+  border-radius: 8px;
+  background: #0284c7;
+  color: white;
+  font-size: 16px;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+button.secondary {
+  background: #475569;
+}
+
+button.danger {
+  background: #be123c;
+}
+
+button:disabled {
+  opacity: 0.5;
+}
+
+.result {
+  background: #0b1020;
+  border-radius: 8px;
+  padding: 13px;
+  margin-top: 12px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+
+.good {
+  color: #4ade80;
+  font-weight: bold;
+}
+
+.bad {
+  color: #fb7185;
+  font-weight: bold;
+}
+
+.small {
+  font-size: 13px;
+  color: #cbd5e1;
+  line-height: 1.6;
+}
+
+code {
+  color: #7dd3fc;
+  overflow-wrap: anywhere;
+}
+
+footer {
+  text-align: center;
+  color: #94a3b8;
+  font-size: 12px;
+  margin: 25px 0;
+}
+</style>
+</head>
+
+<body>
+<div class="container">
+
+<header>
+  <h1>🔐 ZeroProof</h1>
+  <p>Zero-Knowledge Proof Demonstration<br>
+  Schnorr-Style Proof of Knowledge</p>
+</header>
+
+<div class="card">
+  <h2>1. Generate a Secret</h2>
+  <p class="small">
+    Generate a random secret number. The secret stays in this page
+    and is not sent to a server.
+  </p>
+
+  <button id="generate">Generate Secret</button>
+
+  <div class="result" id="secretBox" hidden>
+    <strong>Your secret (x):</strong>
+    <code id="secretValue"></code>
+    <p class="small">Keep this value private in a real system.</p>
+  </div>
+</div>
+
+<div class="card">
+  <h2>2. Create a Proof</h2>
+  <p class="small">
+    The prover creates a commitment and response without sending
+    the secret to a verifier.
+  </p>
+
+  <button id="prove" disabled>Create Proof</button>
+  <div class="result" id="proofBox" hidden></div>
+</div>
+
+<div class="card">
+  <h2>3. Verify the Proof</h2>
+  <p class="small">
+    The verifier checks the proof using public information.
+  </p>
+
+  <button id="verify" disabled>Verify Proof</button>
+  <button id="tamper" class="danger" disabled>Change Proof & Test</button>
+
+  <div class="result" id="verifyBox" aria-live="polite">
+    Waiting for a proof...
+  </div>
+</div>
+
+<div class="card">
+  <h2>How It Works</h2>
+  <p class="small">
+    <strong>Secret:</strong> The private value known to the prover.<br><br>
+    <strong>Public key:</strong> A value derived from the secret.<br><br>
+    <strong>Commitment:</strong> A temporary value used to construct the proof.<br><br>
+    <strong>Challenge:</strong> A value derived from the proof transcript.<br><br>
+    <strong>Response:</strong> The prover's response used by the verifier.
+  </p>
+  <p class="small">
+    Educational illustration only. This simplified demo uses a small
+    finite group and does not provide production-grade security.
+  </p>
+</div>
+
+<footer>
+  ZeroProof Educational Project | HTML + CSS + JavaScript
+</footer>
+
+</div>
+
+<script>
+"use strict";
+
+/*
+ * Educational Schnorr-style proof.
+ * These deliberately tiny parameters are NOT secure.
+ *
+ * p = 23, q = 11, g = 2
+ *
+ * This demo uses a small group so the math is easy to inspect.
+ * Never use these parameters for real security.
+ */
+
+const p = 23n;
+const q = 11n;
+const g = 2n;
+
+let secret = null;
+let publicKey = null;
+let commitment = null;
+let challenge = null;
+let response = null;
+let proofValid = false;
+
+const $ = id => document.getElementById(id);
+
+function randomScalar() {
+  const values = new Uint32Array(1);
+  crypto.getRandomValues(values);
+  return (BigInt(values[0]) % (q - 1n)) + 1n;
+}
+
+function modPow(base, exponent, modulus) {
+  let result = 1n;
+  base %= modulus;
+
+  while (exponent > 0n) {
+    if (exponent & 1n) {
+      result = (result * base) % modulus;
+    }
+    base = (base * base) % modulus;
+    exponent >>= 1n;
+  }
+
+  return result;
+}
+
+function mod(value, modulus) {
+  return ((value % modulus) + modulus) % modulus;
+}
+
+function hashChallenge(y, r) {
+  /*
+   * For this tiny educational group, use a deterministic
+   * transcript challenge. This is not a production protocol.
+   */
+  return mod(y * 3n + r * 7n + 5n, q);
+}
+
+function showProof() {
+  $("proofBox").hidden = false;
+  $("proofBox").innerHTML =
+    "<strong>Public Key (y):</strong> <code>" + publicKey + "</code><br>" +
+    "<strong>Commitment (R):</strong> <code>" + commitment + "</code><br>" +
+    "<strong>Challenge (e):</strong> <code>" + challenge + "</code><br>" +
+    "<strong>Response (s):</strong> <code>" + response + "</code>";
+}
+
+function verifyProof() {
+  if (secret === null || publicKey === null ||
+      commitment === null || response === null) {
+    $("verifyBox").textContent = "Create a proof first.";
+    return;
+  }
+
+  const expectedChallenge = hashChallenge(publicKey, commitment);
+
+  const left = modPow(g, response, p);
+  const right = (commitment *
+    modPow(publicKey, expectedChallenge, p)) % p;
+
+  const valid =
+    expectedChallenge === challenge &&
+    left === right &&
+    publicKey > 1n &&
+    publicKey < p &&
+    commitment > 0n &&
+    commitment < p &&
+    response >= 0n &&
+    response < q;
+
+  proofValid = valid;
+
+  if (valid) {
+    $("verifyBox").innerHTML =
+      '<span class="good">✓ VALID PROOF</span><br>' +
+      "The verification equation holds for this educational demo.";
+  } else {
+    $("verifyBox").innerHTML =
+      '<span class="bad">✗ INVALID PROOF</span><br>' +
+      "The proof failed verification. Create a new proof to try again.";
+  }
+}
+
+$("generate").addEventListener("click", () => {
+  secret = randomScalar();
+  publicKey = modPow(g, secret, p);
+
+  commitment = null;
+  challenge = null;
+  response = null;
+  proofValid = false;
+
+  $("secretValue").textContent = secret.toString();
+  $("secretBox").hidden = false;
+  $("prove").disabled = false;
+  $("verify").disabled = true;
+  $("tamper").disabled = true;
+  $("proofBox").hidden = true;
+  $("verifyBox").textContent = "Secret generated. Create a proof next.";
+});
+
+$("prove").addEventListener("click", () => {
+  if (secret === null) {
+    $("verifyBox").textContent = "Generate a secret first.";
+    return;
+  }
+
+  /*
+   * Schnorr-style demonstration:
+   * R = g^r mod p
+   * e = H(y, R)
+   * s = r + e*x mod q
+   */
+  const nonce = randomScalar();
+  commitment = modPow(g, nonce, p);
+  challenge = hashChallenge(publicKey, commitment);
+  response = mod(nonce + challenge * secret, q);
+
+  showProof();
+
+  $("verify").disabled = false;
+  $("tamper").disabled = false;
+  $("verifyBox").textContent = "Proof created. Press Verify Proof.";
+});
+
+$("verify").addEventListener("click", verifyProof);
+
+$("tamper").addEventListener("click", () => {
+  if (response === null) return;
+
+  response = mod(response + 1n, q);
+  showProof();
+  verifyProof();
+});
+</script>
+
+</body>
+</html>
